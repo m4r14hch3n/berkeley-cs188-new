@@ -209,77 +209,55 @@ def inferenceByVariableEliminationWithCallTracking(callTrackingList=None):
         print("evidenceDict:", evidenceDict)
         print("eliminationOrder:", eliminationOrder)
 
-        # # Step 1: 获取所有CPT，并根据证据进行条件化
-        # factors = []
-
-        # # 使用 getAllCPTsWithEvidence 获取所有CPT
-        # allCPTs = bayesNet.getAllCPTsWithEvidence(evidenceDict)
+        # 1. 获取所有考虑evidence的CPT
+        factors = bayesNet.getAllCPTsWithEvidence(evidenceDict)
+        print("factors:", factors)
         
-        # # Step 2: 将查询变量和证据相关的CPT添加到因子列表
-        # for cpt in allCPTs:
-        #     print("cpt.variables():", cpt.variables())
-        #     if any(var in queryVariables or var in evidenceDict for var in cpt.variables()):
-        #         factors.append(cpt)
-        # print("factor:", factors)
-
-        # # Step 4: 将剩下的因子相乘
-        # result_factor = joinFactors(factors)
-
-        # # Step 5: 归一化，确保结果是有效的概率分布
-        # result_factor = normalize(result_factor)
-        
-        # return result_factor
-  
-        # Step 1: 获取所有CPT，并根据证据进行条件化
-        factors = []
-        allCPTs = bayesNet.getAllCPTsWithEvidence(evidenceDict)
-
-        # Step 2: 收集所有相关的CPT
-        # 不仅包括查询变量和证据相关的，还要包括消除变量相关的
-        for cpt in allCPTs:
-            if any(var in queryVariables or var in evidenceDict or var in eliminationOrder 
-                for var in cpt.variables()):
-                factors.append(cpt)
-
-        # Step 3: 对每个要消除的变量
+        # 2. 对eliminationOrder中的每个变量进行消除
         for var in eliminationOrder:
-            # 找出所有包含当前变量的因子
-            factors_with_var = [f for f in factors if var in f.variables()]
+            print("elimination_var:", var)
+            # 2.1 找出所有包含当前变量的factors
+            factors_with_var = []
+            factors_without_var = []
             
-            if not factors_with_var:
-                continue
-                
-            # 重要：先合并所有相关因子，不管变量是条件的还是非条件的
-            while len(factors_with_var) > 0:
-                # 从主列表中移除这些因子
-                for f in factors_with_var:
-                    if f in factors:
-                        factors.remove(f)
-                        
-                # 合并这些因子
-                joined_factor = joinFactors(factors_with_var)
-                
-                # 如果现在可以安全地消除变量了，就消除它
-                if var in joined_factor.unconditionedVariables() and \
-                len(joined_factor.unconditionedVariables()) > 1:
-                    new_factor = eliminate(joined_factor, var)
+            for factor in factors:
+                if var in factor.variablesSet():
+                    factors_with_var.append(factor)
+                    print("factors_with_var:", factor)
                 else:
-                    new_factor = joined_factor
-                    
-                # 把新因子加入到因子列表中
-                factors.append(new_factor)
-                
-                # 重新检查是否还有包含该变量的因子需要处理
-                factors_with_var = [f for f in factors if var in f.variables()]
-
-        # Step 4: 合并剩余的所有因子
-        if len(factors) == 0:
-            raise Exception("No factors left!")
+                    factors_without_var.append(factor)
+                    print("factors_without_var:", factor)
             
-        final_factor = joinFactors(factors)
-
-        # Step 5: 归一化
-        return normalize(final_factor)
+            
+            
+            # 2.2 必须先执行join操作
+            if len(factors_with_var) > 0:
+                currentFactorsNotToJoin, joined = joinFactorsByVariable(factors_with_var, var)
+                print("factors_with_var_joined:", joined)
+                
+                # 2.3 如果join后的factor中变量只作为唯一的非条件变量出现，则不进行eliminate
+                if len(joined.unconditionedVariables()) == 1 and var in joined.unconditionedVariables():
+                    factors = factors_without_var
+                    print("factors_final", factors)
+                else:
+                    # 2.4 否则执行eliminate
+                    eliminated = eliminate(joined, var)
+                    print("factors_after_eliminated:", eliminated)
+                    factors = factors_without_var + [eliminated]
+                    print("factors_final:", factors)
+        
+        # 3. 将剩余的factors join起来
+        if len(factors) > 1:
+            final = joinFactors(factors)
+            print("factors_final_final:", final)
+        else:
+            final = factors[0]
+            print("factors_final_final:", final)
+        
+        
+            
+        # 4. normalize使概率和为1
+        return normalize(final)
     return inferenceByVariableElimination
 
 inferenceByVariableElimination = inferenceByVariableEliminationWithCallTracking()
@@ -416,9 +394,17 @@ class DiscreteDistribution(dict):
         >>> empty
         {}
         """
-        "*** YOUR CODE HERE ***"
-        raiseNotDefined()
-        "*** END YOUR CODE HERE ***"
+        sum_value = self.total()
+        # print("sum_value:", sum_value)
+        # print("self.keys:", self.keys())
+        # print("self.values:", self.values())
+        # print("self.items:", self.items())
+        if sum_value != 0:
+            for key, value in self.items():
+                self[key] = value / sum_value
+            
+
+        
 
     def sample(self):
         """
@@ -441,9 +427,13 @@ class DiscreteDistribution(dict):
         >>> round(samples.count('d') * 1.0/N, 1)
         0.0
         """
-        "*** YOUR CODE HERE ***"
-        raiseNotDefined()
-        "*** END YOUR CODE HERE ***"
+        sum_value = self.total()
+        random_n = random.random() * sum_value
+        cumulative = 0
+        for key, vaule in self.items():
+            cumulative = cumulative + vaule
+            if random_n < cumulative:
+                return key
 
 
 class InferenceModule:
@@ -516,9 +506,18 @@ class InferenceModule:
         """
         Return the probability P(noisyDistance | pacmanPosition, ghostPosition).
         """
-        "*** YOUR CODE HERE ***"
-        raiseNotDefined()
-        "*** END YOUR CODE HERE ***"
+        # print("noisyDistance:", noisyDistance)
+        # print("pacmanPosition:", pacmanPosition)
+        # print("ghostPosition:", ghostPosition)
+        # print("jailPosition:", jailPosition)
+        if ghostPosition == jailPosition:
+            return 1.0 if noisyDistance is None else 0.0
+        if noisyDistance is None:
+            return 1.0 if ghostPosition == jailPosition else 0.0
+
+        trueDistance = manhattanDistance(pacmanPosition, ghostPosition)
+        return busters.getObservationProbability(noisyDistance, trueDistance)
+        
 
     def setGhostPosition(self, gameState, ghostPosition, index):
         """
@@ -573,13 +572,14 @@ class InferenceModule:
         """
         Set the belief state to a uniform prior belief over all positions.
         """
-        raise NotImplementedError
+        
 
     def observeUpdate(self, observation, gameState):
         """
         Update beliefs based on the given distance observation and gameState.
         """
         raise NotImplementedError
+    
 
     def elapseTime(self, gameState):
         """
@@ -629,10 +629,27 @@ class ExactInference(InferenceModule):
         current position. However, this is not a problem, as Pacman's current
         position is known.
         """
-        "*** YOUR CODE HERE ***"
-        raiseNotDefined()
-        "*** END YOUR CODE HERE ***"
-        self.beliefs.normalize()
+
+        allPossible = DiscreteDistribution()
+        
+        # 遍历所有可能位置
+        for ghostPosition in self.allPositions:
+            pacmanPosition = gameState.getPacmanPosition()
+            jailPosition = self.getJailPosition()
+            # print("pacmanPosition:", pacmanPosition)
+            # print("jailPosition:", jailPosition)
+            # 先验概率
+            prior = self.beliefs[ghostPosition]
+            # print("prior:", prior)
+            # 似然概率
+            likelihood = self.getObservationProb(observation, pacmanPosition, ghostPosition, jailPosition)
+            # print("likelihood:", likelihood)
+            # 后验概率
+            allPossible[ghostPosition] = prior * likelihood
+        
+        # 归一化
+        allPossible.normalize()
+        self.beliefs = allPossible
     
     ########### ########### ###########
     ########### QUESTION 7  ###########
@@ -647,9 +664,22 @@ class ExactInference(InferenceModule):
         Pacman's current position. However, this is not a problem, as Pacman's
         current position is known.
         """
-        "*** YOUR CODE HERE ***"
-        raiseNotDefined()
-        "*** END YOUR CODE HERE ***"
+        allPossible = DiscreteDistribution()
+        for p0 in self.allPositions:
+            
+            oldProb = self.beliefs[p0]
+            
+            if oldProb == 0:
+                continue
+            newPosDist = self.getPositionDistribution(gameState, p0)
+            for p1 in newPosDist.keys():
+                # print("old pos:", p0)
+                # print("old prob:", oldProb)
+                # print("new pos:", p1)
+                # print("likelihood:", newPosDist[p1])
+                allPossible[p1] += oldProb * newPosDist[p1]
+            
+        self.beliefs = allPossible
 
     def getBeliefDistribution(self):
         return self.beliefs
